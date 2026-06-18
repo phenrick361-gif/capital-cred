@@ -508,6 +508,36 @@ hr {
     box-shadow:0 0 30px rgba(212,175,55,.16)!important;
 }
 
+
+/* ===== AJUSTE MOBILE + VENCIMENTO V8 ===== */
+@media (max-width: 768px){
+    .block-container{
+        padding-left: .7rem!important;
+        padding-right: .7rem!important;
+    }
+    [data-testid="stSidebar"]{
+        min-width: 270px!important;
+        max-width: 270px!important;
+    }
+    .kpi-card{
+        min-height:120px!important;
+        padding:14px!important;
+    }
+    .kpi-value{
+        font-size:22px!important;
+    }
+    .panel{
+        padding:14px!important;
+        border-radius:18px!important;
+    }
+    .panel-title{
+        font-size:20px!important;
+    }
+    .trevo-cobranca-v7{
+        font-size:82px!important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -835,7 +865,7 @@ def grafico_status(df_base, hoje_ref):
         values=values,
         hole=.62,
         marker=dict(colors=colors, line=dict(color="#111", width=2)),
-        textinfo="label+percent",
+        textinfo="percent",
         insidetextorientation="radial"
     )])
     fig.update_layout(
@@ -844,7 +874,7 @@ def grafico_status(df_base, hoje_ref):
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#F5F5F5"),
         margin=dict(l=0, r=0, t=10, b=10),
-        legend=dict(orientation="v", y=.5, x=1.02),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=.5, font=dict(size=11)),
         annotations=[dict(text=f"<b>Total</b><br>{len(g)}", x=.5, y=.5, font_size=22, showarrow=False, font_color="white")]
     )
     return fig
@@ -892,7 +922,7 @@ def grafico_valores(df_base, hoje_ref):
         values=values,
         hole=.62,
         marker=dict(colors=colors, line=dict(color="#111", width=2)),
-        textinfo="label+percent",
+        textinfo="percent",
         hovertemplate="<b>%{label}</b><br>R$ %{value:,.2f}<br>%{percent}<extra></extra>"
     )])
 
@@ -902,7 +932,7 @@ def grafico_valores(df_base, hoje_ref):
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#F5F5F5"),
         margin=dict(l=0, r=0, t=10, b=10),
-        legend=dict(orientation="v", y=.5, x=1.02),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=.5, font=dict(size=11)),
         annotations=[dict(text=f"<b>Total</b><br>{dinheiro(total_geral)}", x=.5, y=.5, font_size=18, showarrow=False, font_color="white")]
     )
     return fig
@@ -1020,10 +1050,13 @@ if menu == "Novo Empréstimo":
         data_inicio = selecionar_data("Data de início", hoje, "novo_inicio")
 
         if periodicidade == "Mensal":
-            data_vencimento = adicionar_meses(data_inicio, prazo)
+            vencimento_sugerido = adicionar_meses(data_inicio, prazo)
         else:
             dias_periodo = {"Quinzenal": 15, "Semanal": 7, "Diário": 1}.get(periodicidade, 30)
-            data_vencimento = data_inicio + timedelta(days=dias_periodo * int(prazo))
+            vencimento_sugerido = data_inicio + timedelta(days=dias_periodo * int(prazo))
+
+        st.markdown("---")
+        data_vencimento = selecionar_data("Data de vencimento", vencimento_sugerido, "novo_vencimento")
 
     with aba3:
         st.subheader("Resumo do contrato")

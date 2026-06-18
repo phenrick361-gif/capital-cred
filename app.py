@@ -707,7 +707,8 @@ def preparar_exibicao(df_base):
     for c in ["Data Emprestimo", "Data Vencimento"]:
         if c in tabela.columns:
             tabela[c] = pd.to_datetime(tabela[c], errors="coerce").dt.strftime("%d/%m/%Y")
-    return tabela.drop(columns=["id", "usuario_grupo"], errors="ignore")
+    # Na visualização/relatório principal, deixa só o vencimento.
+    return tabela.drop(columns=["id", "usuario_grupo", "Data Emprestimo"], errors="ignore")
 
 
 def preparar_tabela_pro(df_base, hoje_ref):
@@ -719,6 +720,7 @@ def preparar_tabela_pro(df_base, hoje_ref):
     tabela["Juros"] = tabela["Porcentagem Juros (%)"].apply(lambda x: f"{float(x):.0f}%")
     tabela["Total"] = tabela["Valor Total"].apply(dinheiro)
     tabela["Vencimento"] = pd.to_datetime(tabela["Data Vencimento"], errors="coerce").dt.strftime("%d/%m/%Y")
+    # Na listagem de contratos, mostra só a data de vencimento.
     colunas = ["Cliente", "Descricao", "Valor", "Juros", "Juros Aplicado", "Modalidade", "Vencimento", "Status Visual", "Total"]
     tabela = tabela[colunas].rename(columns={"Descricao": "Descrição", "Status Visual": "Status"})
     return tabela
@@ -1029,6 +1031,23 @@ hoje = date.today()
 # =========================
 if menu == "Novo Empréstimo":
     st.title("➕ Novo Empréstimo")
+    if st.session_state.pop("contrato_salvo_msg", False):
+        st.markdown("""
+        <div style="
+            background:linear-gradient(135deg,#18E061,#079B45);
+            color:white;
+            padding:18px;
+            border-radius:18px;
+            text-align:center;
+            font-size:20px;
+            font-weight:900;
+            box-shadow:0 0 25px rgba(24,224,97,.42);
+            border:1px solid rgba(255,255,255,.18);
+            margin:10px 0 20px 0;
+        ">
+            🍀 Contrato salvo com sucesso!
+        </div>
+        """, unsafe_allow_html=True)
 
     aba1, aba2, aba3 = st.tabs(["1️⃣ Contrato", "2️⃣ Condições", "3️⃣ Resumo"])
 
@@ -1093,7 +1112,7 @@ if menu == "Novo Empréstimo":
                     "Status": "Pendente"
                 }
                 if inserir(row):
-                    st.success("Contrato salvo online com sucesso!")
+                    st.session_state["contrato_salvo_msg"] = True
                     st.rerun()
 
 

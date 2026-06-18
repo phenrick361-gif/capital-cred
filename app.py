@@ -434,6 +434,80 @@ hr {
     font-size:13px;
     padding:12px 0 4px 0;
 }
+
+/* ===== AJUSTES PREMIUM V6 ===== */
+.search-panel-v6{
+    background:linear-gradient(145deg,rgba(17,17,17,.98),rgba(3,3,3,.98));
+    border:1px solid rgba(212,175,55,.62);
+    border-radius:22px;
+    padding:20px;
+    box-shadow:0 0 28px rgba(212,175,55,.14);
+    margin-top:10px;
+    margin-bottom:16px;
+}
+.search-title-v6{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color:#FFD76A;
+    font-size:22px;
+    font-weight:950;
+    margin-bottom:4px;
+}
+.search-sub-v6{
+    color:#BDBDBD;
+    font-size:13px;
+    margin-bottom:14px;
+}
+.quick-pill-v6{
+    display:inline-block;
+    padding:9px 15px;
+    margin:5px 7px 12px 0;
+    border-radius:999px;
+    border:1px solid rgba(212,175,55,.62);
+    color:#FFD76A;
+    background:linear-gradient(145deg,rgba(212,175,55,.13),rgba(0,0,0,.40));
+    font-weight:900;
+    font-size:13px;
+    box-shadow:0 0 12px rgba(212,175,55,.10);
+}
+.clover-img-day{
+    width:96px;
+    height:96px;
+    border-radius:50%;
+    object-fit:cover;
+    border:2px solid rgba(212,175,55,.90);
+    box-shadow:0 0 32px rgba(212,175,55,.45);
+    margin:18px auto 8px auto;
+    display:block;
+}
+
+
+/* ===== AJUSTES FINAIS PEDRO - V7 ===== */
+.trevo-cobranca-v7{
+    font-size:96px;
+    line-height:1;
+    text-align:center;
+    filter:drop-shadow(0 0 22px rgba(24,224,97,.75));
+    margin:12px 0 8px 0;
+}
+.admin-tag-v7{
+    color:#FFD76A;
+    font-size:12px;
+    font-weight:900;
+    letter-spacing:1px;
+    margin-top:2px;
+}
+.status-online-v7{
+    color:#18E061;
+    font-size:13px;
+    font-weight:900;
+}
+.search-panel-v6, .search-panel{
+    border:1px solid rgba(212,175,55,.70)!important;
+    box-shadow:0 0 30px rgba(212,175,55,.16)!important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -696,7 +770,7 @@ def grafico_financeiro(df_base):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=mensal["Mês"], y=mensal["Valor Emprestado"],
-        mode="lines+markers", name="Valor Emprestado",
+        mode="lines+markers", name="Capital Investido",
         line=dict(color="#D4AF37", width=4),
         marker=dict(size=8),
         fill="tozeroy",
@@ -704,7 +778,7 @@ def grafico_financeiro(df_base):
     ))
     fig.add_trace(go.Scatter(
         x=mensal["Mês"], y=mensal["Lucro"],
-        mode="lines+markers", name="Lucro Previsto",
+        mode="lines+markers", name="Lucro Esperado",
         line=dict(color="#18E061", width=4),
         marker=dict(size=8),
         fill="tozeroy",
@@ -712,7 +786,7 @@ def grafico_financeiro(df_base):
     ))
     fig.add_trace(go.Scatter(
         x=mensal["Mês"], y=mensal["Valor Total"],
-        mode="lines+markers", name="Valor Total",
+        mode="lines+markers", name="Total da Carteira",
         line=dict(color="#1E96FF", width=4),
         marker=dict(size=8),
         fill="tozeroy",
@@ -781,19 +855,57 @@ def painel_cobrancas_do_dia(cobrancas, hoje_ref):
     dia_semana = SEMANA[hoje_ref.weekday()]
     if cobrancas.empty:
         texto = "Nenhuma cobrança para hoje! 🎉<br>Tudo em dia!"
+        cor = "#18E061"
     else:
         texto = f"<b>{len(cobrancas)} cobrança(s)</b> para hoje"
+        cor = "#FFD84D"
 
     st.markdown(f"""
     <div class="panel day-card">
-        <div class="panel-title">📅 Cobranças do Dia</div>
+        <div class="panel-title">🍀 Cobranças do Dia</div>
+        <div class="trevo-cobranca-v7">🍀</div>
         <div><span class="big-day">{hoje_ref.day}</span></div>
-        <div style="color:#FFD76A;font-size:18px;font-weight:900">{mes_nome} {hoje_ref.year}</div>
+        <div style="color:#FFD76A;font-size:18px;font-weight:900">{mes_nome} de {hoje_ref.year}</div>
         <div style="color:#fff;font-size:15px;margin-top:3px">{dia_semana}</div>
-        <div style="margin-top:24px;color:#fff;font-size:16px;line-height:1.6">{texto}</div>
-        <div class="clover-big">🍀</div>
+        <div style="margin-top:18px;color:{cor};font-size:16px;line-height:1.6;font-weight:850">{texto}</div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def grafico_valores(df_base, hoje_ref):
+    if df_base.empty:
+        return None
+
+    total_emp = float(df_base["Valor Emprestado"].sum())
+    total_lucro = float(df_base["Lucro"].sum())
+    total_geral = float(df_base["Valor Total"].sum())
+
+    atrasados = df_base[(df_base["Data Vencimento"] < hoje_ref) & (df_base["Status"] == "Pendente")]
+    valor_atrasado = float(atrasados["Valor Total"].sum()) if not atrasados.empty else 0.0
+
+    labels = ["Valor Emprestado", "Lucro Previsto", "Total a Receber", "Inadimplência"]
+    values = [total_emp, total_lucro, total_geral, valor_atrasado]
+    colors = ["#D4AF37", "#18E061", "#1E96FF", "#FF4D4D"]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=.62,
+        marker=dict(colors=colors, line=dict(color="#111", width=2)),
+        textinfo="label+percent",
+        hovertemplate="<b>%{label}</b><br>R$ %{value:,.2f}<br>%{percent}<extra></extra>"
+    )])
+
+    fig.update_layout(
+        height=405,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#F5F5F5"),
+        margin=dict(l=0, r=0, t=10, b=10),
+        legend=dict(orientation="v", y=.5, x=1.02),
+        annotations=[dict(text=f"<b>Total</b><br>{dinheiro(total_geral)}", x=.5, y=.5, font_size=18, showarrow=False, font_color="white")]
+    )
+    return fig
 
 
 def montar_cobrancas_amanha(df_base, hoje_ref):
@@ -852,8 +964,9 @@ st.sidebar.markdown(f"""
 <div class="side-card user-box">
     <div class="avatar">PH</div>
     <div>
-        <div class="user-name">{st.session_state.get('usuario_nome','Conta')}</div>
-        <div class="user-status">● Conta conectada</div>
+        <div class="user-name">👑 {st.session_state.get('usuario_nome','Pedro Henrick')}</div>
+        <div class="admin-tag-v7">ADMINISTRADOR</div>
+        <div class="status-online-v7">🟢 Sistema Online</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -864,7 +977,7 @@ if st.sidebar.button("🚪 Sair"):
 
 menu = st.sidebar.radio(
     "Menu",
-    ["Dashboard", "Clientes", "Empréstimos", "Novo Contrato", "Editar / Receber / Excluir", "Relatórios"]
+    ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenciar Contratos", "Relatórios"]
 )
 
 st.sidebar.markdown("""
@@ -884,8 +997,8 @@ hoje = date.today()
 # =========================
 # NOVO CONTRATO
 # =========================
-if menu == "Novo Contrato":
-    st.title("➕ Novo Contrato")
+if menu == "Novo Empréstimo":
+    st.title("➕ Novo Empréstimo")
 
     aba1, aba2, aba3 = st.tabs(["1️⃣ Contrato", "2️⃣ Condições", "3️⃣ Resumo"])
 
@@ -954,8 +1067,8 @@ if menu == "Novo Contrato":
 # =========================
 # EDITAR
 # =========================
-elif menu == "Editar / Receber / Excluir":
-    st.title("⚙️ Editar / Receber / Excluir")
+elif menu == "Gerenciar Contratos":
+    st.title("⚙️ Gerenciar Contratos")
 
     if df.empty:
         st.info("Nenhum cliente cadastrado.")
@@ -1047,22 +1160,22 @@ else:
         elif menu == "Relatórios":
             st.title("📑 Relatórios")
         else:
-            st.title("💼 Empréstimos")
+            st.title("💼 Carteira")
 
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             kpi_card("Clientes Ativos", len(df), "👥", "Total cadastrados")
         with c2:
-            kpi_card("Valor Emprestado", dinheiro(total_emp), "💰", "Total em aberto", "yellow")
+            kpi_card("Capital Investido", dinheiro(total_emp), "💰", "Total em aberto", "yellow")
         with c3:
-            kpi_card("Lucro Previsto", dinheiro(total_lucro), "📈", "A receber", "blue")
+            kpi_card("Lucro Esperado", dinheiro(total_lucro), "📈", "A receber", "blue")
         with c4:
-            kpi_card("Total a Receber", dinheiro(total_geral), "💵", "Principal + juros")
+            kpi_card("Total da Carteira", dinheiro(total_geral), "💵", "Principal + juros")
         with c5:
-            kpi_card("Atrasados", len(atrasados), "❗", "Clientes em atraso", "red")
+            kpi_card("Inadimplentes", len(atrasados), "❗", "Contratos vencidos", "red")
 
         if menu in ["Dashboard", "Relatórios"]:
-            col_chart, col_status, col_day = st.columns([2.05, 1.15, 1.08])
+            col_chart, col_values = st.columns([1.45, 1.0])
             with col_chart:
                 st.markdown('<div class="panel"><div class="panel-title">📊 Resumo Financeiro</div>', unsafe_allow_html=True)
                 fig = grafico_financeiro(df)
@@ -1070,6 +1183,14 @@ else:
                     st.plotly_chart(fig, use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
+            with col_values:
+                st.markdown('<div class="panel"><div class="panel-title">💎 Resumo por Categoria</div>', unsafe_allow_html=True)
+                figv = grafico_valores(df, hoje)
+                if figv:
+                    st.plotly_chart(figv, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            col_status, col_day = st.columns([1.15, 1.0])
             with col_status:
                 st.markdown('<div class="panel"><div class="panel-title">🍀 Situação dos Clientes</div>', unsafe_allow_html=True)
                 fig2 = grafico_status(df, hoje)
@@ -1080,19 +1201,28 @@ else:
             with col_day:
                 painel_cobrancas_do_dia(cobrancas, hoje)
 
-        st.markdown('<div class="search-panel"><div class="panel-title">🔎 Buscar e Filtrar</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="search-panel-v6">
+            <div class="search-title-v6">🔎 Central de Pesquisa Inteligente</div>
+            <div class="search-sub-v6">Busque rapidamente por cliente, descrição, valor ou situação do contrato.</div>
+        """, unsafe_allow_html=True)
 
-        busca = st.text_input("Buscar por cliente, descrição ou telefone", placeholder="Digite para buscar...")
+        busca = st.text_input("Pesquisar", placeholder="Digite nome do cliente, descrição, valor ou ID...")
         filtro_status = st.selectbox("Filtrar por situação", ["Todos", "Pendente", "Pago", "Atrasado", "Cobrança Hoje", "Em dia"])
 
-        st.markdown('<span class="pill">Todos</span><span class="pill">Em dia</span><span class="pill">Atrasados</span><span class="pill">Vencem hoje</span>', unsafe_allow_html=True)
+        st.markdown('<span class="quick-pill-v6">👥 Todos</span><span class="quick-pill-v6">✅ Em dia</span><span class="quick-pill-v6">🚨 Atrasados</span><span class="quick-pill-v6">⚠️ Vencem hoje</span><span class="quick-pill-v6">💰 Pagos</span>', unsafe_allow_html=True)
 
         tabela = df.copy()
 
         if busca:
+            busca_txt = str(busca)
             tabela = tabela[
-                tabela["Cliente"].astype(str).str.contains(busca, case=False, na=False)
-                | tabela["Descricao"].astype(str).str.contains(busca, case=False, na=False)
+                tabela["Cliente"].astype(str).str.contains(busca_txt, case=False, na=False)
+                | tabela["Descricao"].astype(str).str.contains(busca_txt, case=False, na=False)
+                | tabela["Valor Emprestado"].astype(str).str.contains(busca_txt, case=False, na=False)
+                | tabela["Porcentagem Juros (%)"].astype(str).str.contains(busca_txt, case=False, na=False)
+                | tabela["Status"].astype(str).str.contains(busca_txt, case=False, na=False)
+                | tabela["id"].astype(str).str.contains(busca_txt, case=False, na=False)
             ]
 
         if filtro_status == "Pendente":
@@ -1106,7 +1236,7 @@ else:
         elif filtro_status == "Em dia":
             tabela = tabela[(tabela["Data Vencimento"] > hoje) & (tabela["Status"] == "Pendente")]
 
-        if menu == "Empréstimos":
+        if menu == "Carteira":
             cols = st.columns(3)
             for i, (_, row) in enumerate(tabela.iterrows()):
                 with cols[i % 3]:

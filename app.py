@@ -1418,16 +1418,23 @@ if st.sidebar.button("🚪 Sair"):
 
 opcoes_menu = ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenciar Contratos", "Relatórios"]
 
-# Menu ligado na URL: agora a seta voltar/avançar do navegador funciona
+# Menu ligado na URL: a seta voltar/avançar do navegador funciona
 menu_url = get_qp("menu", opcoes_menu[0])
+
+# Compatibilidade com links antigos
+if menu_url == "Painel":
+    menu_url = "Dashboard"
+
 if menu_url not in opcoes_menu:
     menu_url = opcoes_menu[0]
 
+# IMPORTANTE: a key muda junto com a URL.
+# Se usar key fixa, o radio fica preso no menu antigo e o botão "Abrir Clientes" não abre.
 menu = st.sidebar.radio(
     "Menu",
     opcoes_menu,
     index=opcoes_menu.index(menu_url),
-    key="menu_radio_browser"
+    key=f"menu_radio_browser_{menu_url}"
 )
 
 # Quando clicar no menu lateral, atualiza a URL também

@@ -11,13 +11,20 @@ import calendar
 # =========================================================
 
 
+
+def montar_url(menu, filtro="Todos", edit_id=None):
+    from urllib.parse import quote
+    url = f"?menu={quote(str(menu))}&filtro={quote(str(filtro))}"
+    if edit_id is not None:
+        url += f"&edit_id={quote(str(edit_id))}"
+    return url
+
 def ir_para(menu, filtro="Todos", edit_id=None):
     params = {"menu": menu, "filtro": filtro}
     if edit_id is not None:
         params["edit_id"] = str(edit_id)
     st.query_params.update(params)
     st.rerun()
-
 
 
 def get_qp(nome, padrao=None):
@@ -34,6 +41,21 @@ def limpar_url():
 
 
 st.set_page_config(page_title="CRED • Gestão Financeira", page_icon="🍀", layout="wide")
+
+st.markdown("""
+<style>
+a[data-testid="stLinkButton"] > button,
+div[data-testid="stLinkButton"] button {
+    background: linear-gradient(90deg,#fff4b0,#ffd21f) !important;
+    color: #3b2b00 !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(255,215,106,.65) !important;
+    font-weight: 900 !important;
+    min-height: 46px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 SUPABASE_URL = "https://uyklbdzjqhxmdgjdppcs.supabase.co"
 SUPABASE_KEY = "sb_publishable_5sWqJesHJGnEJcMVhovetg_9Qj3XSDa"
@@ -1673,20 +1695,16 @@ else:
                 ir_para("Carteira", "Todos")
         with c2:
             kpi_card("Capital Investido", dinheiro(total_emp), "💰", "Total em aberto", "yellow")
-            if st.button("Abrir Capital", key="kpi_capital", use_container_width=True):
-                ir_para("Carteira", "Pendente")
+            st.link_button("Abrir Capital", montar_url("Carteira", "Pendente"), use_container_width=True)
         with c3:
             kpi_card("Lucro Esperado", dinheiro(total_lucro), "📈", "A receber", "blue")
-            if st.button("Abrir Lucro", key="kpi_lucro", use_container_width=True):
-                ir_para("Carteira", "Pendente")
+            st.link_button("Abrir Lucro", montar_url("Carteira", "Pendente"), use_container_width=True)
         with c4:
             kpi_card("Total da Carteira", dinheiro(total_geral), "💵", "Principal + juros")
-            if st.button("Abrir Carteira", key="kpi_carteira", use_container_width=True):
-                ir_para("Carteira", "Todos")
+            st.link_button("Abrir Carteira", montar_url("Carteira", "Todos"), use_container_width=True)
         with c5:
             kpi_card("Inadimplentes", len(atrasados), "❗", "Contratos vencidos", "red")
-            if st.button("Abrir Atrasados", key="kpi_atrasados", use_container_width=True):
-                ir_para("Carteira", "Atrasado")
+            st.link_button("Abrir Atrasados", montar_url("Carteira", "Atrasado"), use_container_width=True)
 
         if menu in ["Dashboard", "Relatórios"]:
             col_chart, col_status = st.columns([1.45, 1.0])

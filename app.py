@@ -11,21 +11,13 @@ import calendar
 # =========================================================
 
 
-
-def montar_url(menu, filtro="Todos", edit_id=None):
-    from urllib.parse import quote
-    url = f"?menu={quote(str(menu))}&filtro={quote(str(filtro))}"
-    if edit_id is not None:
-        url += f"&edit_id={quote(str(edit_id))}"
-    return url
-
 def ir_para(menu, filtro="Todos", edit_id=None):
     params = {"menu": menu, "filtro": filtro}
     if edit_id is not None:
         params["edit_id"] = str(edit_id)
+    st.session_state["menu_forcado"] = menu
     st.query_params.update(params)
     st.rerun()
-
 
 def get_qp(nome, padrao=None):
     try:
@@ -41,21 +33,6 @@ def limpar_url():
 
 
 st.set_page_config(page_title="CRED • Gestão Financeira", page_icon="🍀", layout="wide")
-
-st.markdown("""
-<style>
-a[data-testid="stLinkButton"] > button,
-div[data-testid="stLinkButton"] button {
-    background: linear-gradient(90deg,#fff4b0,#ffd21f) !important;
-    color: #3b2b00 !important;
-    border-radius: 16px !important;
-    border: 1px solid rgba(255,215,106,.65) !important;
-    font-weight: 900 !important;
-    min-height: 46px !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 
 SUPABASE_URL = "https://uyklbdzjqhxmdgjdppcs.supabase.co"
 SUPABASE_KEY = "sb_publishable_5sWqJesHJGnEJcMVhovetg_9Qj3XSDa"
@@ -1439,30 +1416,22 @@ if st.sidebar.button("🚪 Sair"):
     st.rerun()
 
 opcoes_menu = ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenciar Contratos", "Relatórios"]
-
-# Menu ligado na URL: a seta voltar/avançar do navegador funciona
-menu_url = get_qp("menu", opcoes_menu[0])
-
-# Compatibilidade com links antigos
-if menu_url == "Painel":
-    menu_url = "Dashboard"
-
-if menu_url not in opcoes_menu:
-    menu_url = opcoes_menu[0]
-
-# IMPORTANTE: a key muda junto com a URL.
-# Se usar key fixa, o radio fica preso no menu antigo e o botão "Abrir Clientes" não abre.
-menu = st.sidebar.radio(
-    "Menu",
-    opcoes_menu,
-    index=opcoes_menu.index(menu_url),
-    key=f"menu_radio_browser_{menu_url}"
-)
-
-# Quando clicar no menu lateral, atualiza a URL também
-if menu != menu_url:
-    st.query_params.update({"menu": menu, "filtro": get_qp("filtro", "Todos")})
+menu_qp = get_qp("menu", opcoes_menu[0])
+if menu_qp not in opcoes_menu:
+    menu_qp = opcoes_menu[0]
+menu_url_forcado = st.session_state.pop("menu_forcado", None) or get_qp("menu", None)
+if "menu_atual_manual" not in st.session_state:
+    st.session_state["menu_atual_manual"] = menu_url_forcado if menu_url_forcado in opcoes_menu else opcoes_menu[0]
+menu = st.sidebar.radio("Menu", opcoes_menu, index=opcoes_menu.index(st.session_state["menu_atual_manual"]), key="menu_radio_corrigido")
+if menu != st.session_state.get("menu_atual_manual"):
+    st.session_state["menu_atual_manual"] = menu
+    limpar_url()
     st.rerun()
+st.session_state["menu_atual_manual"] = menu
+# Força a navegação quando um botão muda a URL (?menu=...)
+menu_forcado = get_qp("menu", None)
+if menu_forcado in opcoes_menu:
+    menu = menu_forcado
 
 st.sidebar.markdown("""
 <div class="side-card">
@@ -1695,16 +1664,20 @@ else:
                 ir_para("Carteira", "Todos")
         with c2:
             kpi_card("Capital Investido", dinheiro(total_emp), "💰", "Total em aberto", "yellow")
-            st.link_button("Abrir Capital", montar_url("Carteira", "Pendente"), use_container_width=True)
+            if st.button("Abrir Capital", key="kpi_capital", use_container_width=True):
+                ir_para("Carteira", "Pendente")
         with c3:
             kpi_card("Lucro Esperado", dinheiro(total_lucro), "📈", "A receber", "blue")
-            st.link_button("Abrir Lucro", montar_url("Carteira", "Pendente"), use_container_width=True)
+            if st.button("Abrir Lucro", key="kpi_lucro", use_container_width=True):
+                ir_para("Carteira", "Pendente")
         with c4:
             kpi_card("Total da Carteira", dinheiro(total_geral), "💵", "Principal + juros")
-            st.link_button("Abrir Carteira", montar_url("Carteira", "Todos"), use_container_width=True)
+            if st.button("Abrir Carteira", key="kpi_carteira", use_container_width=True):
+                ir_para("Carteira", "Todos")
         with c5:
             kpi_card("Inadimplentes", len(atrasados), "❗", "Contratos vencidos", "red")
-            st.link_button("Abrir Atrasados", montar_url("Carteira", "Atrasado"), use_container_width=True)
+            if st.button("Abrir Atrasados", key="kpi_atrasados", use_container_width=True):
+                ir_para("Carteira", "Atrasado")
 
         if menu in ["Dashboard", "Relatórios"]:
             col_chart, col_status = st.columns([1.45, 1.0])

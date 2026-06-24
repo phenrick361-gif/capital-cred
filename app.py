@@ -1417,27 +1417,23 @@ if st.sidebar.button("🚪 Sair"):
     st.rerun()
 
 opcoes_menu = ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenciar Contratos", "Relatórios"]
-menu_qp = get_qp("menu", opcoes_menu[0])
-if menu_qp not in opcoes_menu:
-    menu_qp = opcoes_menu[0]
-menu_url_forcado = get_qp("menu", None)
-if "menu_atual_manual" not in st.session_state:
-    # removido para permitir voltar pelo navegador_url_forcado if menu_url_forcado in opcoes_menu else opcoes_menu[0]
-menu_url = get_qp("menu", None)
+
+# Menu ligado na URL: agora a seta voltar/avançar do navegador funciona
+menu_url = get_qp("menu", opcoes_menu[0])
 if menu_url not in opcoes_menu:
     menu_url = opcoes_menu[0]
-menu = st.sidebar.radio("Menu", opcoes_menu, index=opcoes_menu.index(menu_url), key="menu_radio_browser")
+
+menu = st.sidebar.radio(
+    "Menu",
+    opcoes_menu,
+    index=opcoes_menu.index(menu_url),
+    key="menu_radio_browser"
+)
+
+# Quando clicar no menu lateral, atualiza a URL também
 if menu != menu_url:
     st.query_params.update({"menu": menu, "filtro": get_qp("filtro", "Todos")})
     st.rerun()
-    # removido para permitir voltar pelo navegador
-    limpar_url()
-    st.rerun()
-# removido para permitir voltar pelo navegador
-# Força a navegação quando um botão muda a URL (?menu=...)
-menu_forcado = get_qp("menu", None)
-if menu_forcado in opcoes_menu:
-    menu = menu_forcado
 
 st.sidebar.markdown("""
 <div class="side-card">

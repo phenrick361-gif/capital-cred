@@ -15,9 +15,10 @@ def ir_para(menu, filtro="Todos", edit_id=None):
     params = {"menu": menu, "filtro": filtro}
     if edit_id is not None:
         params["edit_id"] = str(edit_id)
-    st.session_state["menu_forcado"] = menu
     st.query_params.update(params)
     st.rerun()
+
+
 
 def get_qp(nome, padrao=None):
     try:
@@ -1419,15 +1420,20 @@ opcoes_menu = ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenci
 menu_qp = get_qp("menu", opcoes_menu[0])
 if menu_qp not in opcoes_menu:
     menu_qp = opcoes_menu[0]
-menu_url_forcado = st.session_state.pop("menu_forcado", None) or get_qp("menu", None)
+menu_url_forcado = get_qp("menu", None)
 if "menu_atual_manual" not in st.session_state:
-    st.session_state["menu_atual_manual"] = menu_url_forcado if menu_url_forcado in opcoes_menu else opcoes_menu[0]
-menu = st.sidebar.radio("Menu", opcoes_menu, index=opcoes_menu.index(st.session_state["menu_atual_manual"]), key="menu_radio_corrigido")
-if menu != st.session_state.get("menu_atual_manual"):
-    st.session_state["menu_atual_manual"] = menu
+    # removido para permitir voltar pelo navegador_url_forcado if menu_url_forcado in opcoes_menu else opcoes_menu[0]
+menu_url = get_qp("menu", None)
+if menu_url not in opcoes_menu:
+    menu_url = opcoes_menu[0]
+menu = st.sidebar.radio("Menu", opcoes_menu, index=opcoes_menu.index(menu_url), key="menu_radio_browser")
+if menu != menu_url:
+    st.query_params.update({"menu": menu, "filtro": get_qp("filtro", "Todos")})
+    st.rerun()
+    # removido para permitir voltar pelo navegador
     limpar_url()
     st.rerun()
-st.session_state["menu_atual_manual"] = menu
+# removido para permitir voltar pelo navegador
 # Força a navegação quando um botão muda a URL (?menu=...)
 menu_forcado = get_qp("menu", None)
 if menu_forcado in opcoes_menu:

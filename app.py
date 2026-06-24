@@ -10,6 +10,28 @@ import calendar
 # Login padrão: Pedro / pedro12
 # =========================================================
 
+
+def ir_para(menu, filtro="Todos", edit_id=None):
+    params = {"menu": menu, "filtro": filtro}
+    if edit_id is not None:
+        params["edit_id"] = str(edit_id)
+    st.session_state["menu_forcado"] = menu
+    st.query_params.update(params)
+    st.rerun()
+
+def get_qp(nome, padrao=None):
+    try:
+        return st.query_params.get(nome, padrao)
+    except Exception:
+        return padrao
+
+def limpar_url():
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
+
 st.set_page_config(page_title="CRED • Gestão Financeira", page_icon="🍀", layout="wide")
 
 SUPABASE_URL = "https://uyklbdzjqhxmdgjdppcs.supabase.co"
@@ -23,6 +45,60 @@ HEADERS = {
     "Content-Type": "application/json",
     "Prefer": "return=representation",
 }
+
+
+def _extrair_id_registro(obj):
+    try:
+        if isinstance(obj, (pd.Series, dict)):
+            return str(obj.get("id", ""))
+    except Exception:
+        pass
+    return str(obj)
+
+
+def marcar_pago_rapido(id_registro):
+    try:
+        rid = _extrair_id_registro(id_registro)
+        payload = {"Status": "Pago"}
+        url = f"{SUPABASE_URL}/rest/v1/{TABELA}?id=eq.{rid}"
+        r = requests.patch(url, headers=HEADERS, json=payload, timeout=15)
+        return r.status_code in [200, 204], r.text
+    except Exception as e:
+        return False, str(e)
+
+
+def pagar_juros_rapido(id_registro, data_vencimento_atual=None):
+    try:
+        rid = _extrair_id_registro(id_registro)
+
+        # Se receber a linha inteira do contrato, pega o vencimento dela.
+        if isinstance(id_registro, (pd.Series, dict)) and data_vencimento_atual is None:
+            data_vencimento_atual = id_registro.get("Data Vencimento", date.today())
+
+        base = data_vencimento_atual or date.today()
+        try:
+            if not isinstance(base, date):
+                base = pd.to_datetime(base, errors="coerce").date()
+        except Exception:
+            base = date.today()
+
+        if pd.isna(base):
+            base = date.today()
+
+        novo_venc = base + timedelta(days=30)
+
+        # Pagar juros: mantém o contrato pendente, mas joga o vencimento para o próximo mês.
+        # Assim ele some das cobranças de hoje e continua em aberto para a próxima data.
+        payload = {
+            "data_vencimento": str(novo_venc),
+            "status": "Pendente"
+        }
+        url = f"{SUPABASE_URL}/rest/v1/{TABELA}?id=eq.{rid}"
+        r = requests.patch(url, headers=HEADERS, json=payload, timeout=15)
+        return r.status_code in [200, 204], r.text
+    except Exception as e:
+        return False, str(e)
+
 
 USUARIOS = {
     "Pedro": {"senha": "pedro12", "nome": "Pedro Henrick", "grupo": "pedro"},
@@ -538,6 +614,13 @@ hr {
     }
 }
 
+
+/* Ajustes finais: botões e cobranças */
+div.stButton > button {
+    border-radius: 14px !important;
+    font-weight: 900 !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -740,7 +823,8 @@ def kpi_card(titulo, valor, icone, sub, cor="green"):
 
 def card_emprestimo(row):
     hoje_local = date.today()
-    venc = pd.to_datetime(row["Data Vencimento"]).date()
+    venc = pd.to_datetime(row["Data Vencimento"], errors="coerce")
+    venc = hoje_local if pd.isna(venc) else venc.date()
     dias = (venc - hoje_local).days
 
     if row["Status"] == "Pago":
@@ -764,7 +848,7 @@ def card_emprestimo(row):
     <div class="loan-card">
         <div style="display:flex;justify-content:space-between;align-items:start;">
             <div>
-                <div class="loan-title">{row['Cliente']}</div>
+                <div class="loan-title">{str(row['Cliente']).title()}</div>
                 <div class="loan-sub">{row['Descricao']}</div>
             </div>
             <div>{badge}</div>
@@ -779,6 +863,27 @@ def card_emprestimo(row):
         <div class="loan-sub" style="margin-top:10px;">✅ {situacao_txt}</div>
     </div>
     """, unsafe_allow_html=True)
+
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        if st.button("💳 Pagar", key=f"pagar_{row['id']}", use_container_width=True):
+            ok, resp = marcar_pago_rapido(row)
+            if ok:
+                st.success("Contrato marcado como pago.")
+                st.rerun()
+            else:
+                st.error(resp)
+    with b2:
+        if st.button("💰 Pagar Juros", key=f"juros_{row['id']}", use_container_width=True):
+            ok, resp = pagar_juros_rapido(row)
+            if ok:
+                st.success("Juros recebido. Vencimento jogado para o próximo mês.")
+                st.rerun()
+            else:
+                st.error(resp)
+    with b3:
+        if st.button("✏️ Editar", key=f"editar_{row['id']}", use_container_width=True):
+            ir_para("Gerenciar Contratos", "Todos", row["id"])
 
 
 def grafico_financeiro(df_base):
@@ -885,23 +990,188 @@ def grafico_status(df_base, hoje_ref):
 def painel_cobrancas_do_dia(cobrancas, hoje_ref):
     mes_nome = MESES[hoje_ref.month - 1]
     dia_semana = SEMANA[hoje_ref.weekday()]
-    if cobrancas.empty:
-        texto = "Nenhuma cobrança para hoje! 🎉<br>Tudo em dia!"
-        cor = "#18E061"
-    else:
-        texto = f"<b>{len(cobrancas)} cobrança(s)</b> para hoje"
-        cor = "#FFD84D"
+    qtd = 0 if cobrancas.empty else len(cobrancas)
+    cor = "#18E061" if qtd == 0 else "#FFD84D"
+    texto = "Nenhuma cobrança para hoje! 🎉<br>Tudo em dia!" if qtd == 0 else f"<b>{qtd} cobrança(s)</b> para hoje"
 
     st.markdown(f"""
-    <div class="panel day-card">
+    <div class="panel day-card" style="min-height:405px;">
         <div class="panel-title">🍀 Cobranças do Dia</div>
-        <div class="trevo-cobranca-v7">🍀</div>
-        <div><span class="big-day">{hoje_ref.day}</span></div>
-        <div style="color:#FFD76A;font-size:18px;font-weight:900">{mes_nome} de {hoje_ref.year}</div>
-        <div style="color:#fff;font-size:15px;margin-top:3px">{dia_semana}</div>
-        <div style="margin-top:18px;color:{cor};font-size:16px;line-height:1.6;font-weight:850">{texto}</div>
+        <div style="display:flex;align-items:center;gap:18px;margin-top:18px;">
+            <div class="big-day" style="font-size:74px;line-height:.9;">{hoje_ref.day}</div>
+            <div>
+                <div style="color:#FFD76A;font-size:20px;font-weight:950">{mes_nome} de {hoje_ref.year}</div>
+                <div style="color:#fff;font-size:15px;margin-top:3px">{dia_semana}</div>
+            </div>
+        </div>
+        <div class="trevo-cobranca-v7" style="font-size:70px;margin-top:18px;">🍀</div>
+        <div style="margin-top:14px;color:{cor};font-size:17px;line-height:1.6;font-weight:900;text-align:center">{texto}</div>
     </div>
     """, unsafe_allow_html=True)
+
+
+
+
+
+
+
+
+def painel_recebimentos_hoje(df_base, cobrancas):
+    hoje_local = date.today()
+
+    falta = 0.0
+    qtd_cobrancas = 0
+
+    if isinstance(cobrancas, pd.DataFrame) and not cobrancas.empty:
+        qtd_cobrancas = len(cobrancas)
+        if "Valor Total" in cobrancas.columns:
+            falta = float(pd.to_numeric(cobrancas["Valor Total"], errors="coerce").fillna(0).sum())
+        elif "Valor Emprestado" in cobrancas.columns:
+            falta = float(pd.to_numeric(cobrancas["Valor Emprestado"], errors="coerce").fillna(0).sum())
+
+    recebido = 0.0
+    qtd_pagos = 0
+
+    try:
+        base = df_base.copy() if isinstance(df_base, pd.DataFrame) else pd.DataFrame()
+        if not base.empty and "Status" in base.columns:
+            pagos = base[base["Status"].astype(str).str.strip().str.title() == "Pago"].copy()
+
+            col_data = None
+            for c in ["Data Pagamento", "Data Pago", "Pago Em", "updated_at", "Atualizado Em"]:
+                if c in pagos.columns:
+                    col_data = c
+                    break
+
+            if col_data and not pagos.empty:
+                datas = pd.to_datetime(pagos[col_data], errors="coerce").dt.date
+                pagos = pagos[datas == hoje_local]
+
+            qtd_pagos = len(pagos)
+
+            if "Valor Total" in pagos.columns:
+                recebido = float(pd.to_numeric(pagos["Valor Total"], errors="coerce").fillna(0).sum())
+            elif "Valor Emprestado" in pagos.columns:
+                recebido = float(pd.to_numeric(pagos["Valor Emprestado"], errors="coerce").fillna(0).sum())
+    except Exception:
+        recebido = 0.0
+        qtd_pagos = 0
+
+    total_previsto = recebido + falta
+    progresso = 0 if total_previsto <= 0 else min(1.0, recebido / total_previsto)
+
+    # CSS só para deixar o container bonito; os dados são renderizados com Streamlit normal.
+    st.markdown("""
+    <style>
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.recebimentos-card-marker) {
+        border: 1px solid rgba(255, 215, 106, .50) !important;
+        border-radius: 28px !important;
+        background: linear-gradient(145deg, rgba(18,18,18,.98), rgba(37,37,37,.96)) !important;
+        box-shadow: 0 12px 40px rgba(0,0,0,.35) !important;
+    }
+    .recebimentos-card-marker { display:none; }
+    .receb-green-number {
+        color:#18E061;
+        font-size:42px;
+        font-weight:950;
+        text-shadow:0 0 16px rgba(24,224,97,.25);
+        margin:8px 0 0 0;
+    }
+    .receb-row {
+        display:flex;
+        justify-content:space-between;
+        border-top:1px solid rgba(255,255,255,.10);
+        padding:12px 0;
+        color:white;
+        font-weight:900;
+    }
+    .receb-row b { color:#FFD84D; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.markdown('<div class="recebimentos-card-marker"></div>', unsafe_allow_html=True)
+
+        st.markdown("### 💰 Recebimentos de Hoje")
+        st.caption("Resumo do dia de cobrança")
+
+        st.markdown(f'<div class="receb-green-number">{dinheiro(recebido)}</div>', unsafe_allow_html=True)
+        st.caption("já recebido hoje")
+
+        st.markdown(f'<div class="receb-row"><span>⏳ Falta receber</span><b>{dinheiro(falta)}</b></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="receb-row"><span>📌 Cobranças hoje</span><b>{qtd_cobrancas}</b></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="receb-row"><span>✅ Pagos hoje</span><b>{qtd_pagos}</b></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="receb-row"><span>🎯 Total previsto</span><b>{dinheiro(total_previsto)}</b></div>', unsafe_allow_html=True)
+
+        st.progress(progresso)
+        st.caption(f"{int(progresso * 100)}% do previsto para hoje já foi recebido.")
+
+
+
+def painel_lista_cobrancas(cobrancas):
+    qtd = 0 if cobrancas is None or cobrancas.empty else len(cobrancas)
+
+    st.markdown("""
+    <style>
+    .cob-header-fix {display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+    .cob-title-fix {font-size:28px;font-weight:950;color:white;}
+    .cob-badge-fix {background:rgba(255,216,77,.12);border:1px solid rgba(255,216,77,.55);color:#FFD84D;padding:7px 14px;border-radius:999px;font-weight:950;}
+    .cob-card-fix {background:linear-gradient(145deg,rgba(18,18,18,.98),rgba(5,5,5,.98));border:1px solid rgba(212,175,55,.45);border-radius:18px;padding:14px 16px;margin:10px 0 6px 0;display:flex;gap:12px;align-items:center;box-shadow:0 8px 22px rgba(0,0,0,.22);}
+    .avatar-fix {width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#109d45,#7ef28c);color:white;display:flex;align-items:center;justify-content:center;font-weight:950;flex:0 0 auto;}
+    .nome-fix {font-weight:950;color:white;font-size:17px;}
+    .desc-fix {color:#cfcfcf;font-size:13px;margin-top:2px;}
+    .total-fix {color:#FFD84D;font-weight:950;font-size:20px;margin-top:3px;}
+    div[data-testid="stVerticalBlockBorderWrapper"] {border-color: rgba(212,175,55,.45) !important;border-radius: 28px !important;background: linear-gradient(145deg, rgba(18,18,18,.98), rgba(34,34,34,.96)) !important;box-shadow: 0 12px 40px rgba(0,0,0,.35) !important;}
+    div.stButton > button {border-radius:14px !important;font-weight:900 !important;min-height:42px;}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # height cria scroll interno real quando tiver muitos contratos
+    with st.container(height=560, border=True):
+        st.markdown(f"""
+        <div class="cob-header-fix">
+            <div class="cob-title-fix">📌 Contratos para cobrar hoje</div>
+            <div class="cob-badge-fix">{qtd} contrato(s)</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if qtd == 0:
+            st.info("Nenhum contrato para cobrar hoje.")
+            return
+
+        for _, row in cobrancas.iterrows():
+            iniciais = "".join([p[0] for p in str(row["Cliente"]).split()[:2]]).upper() or "CL"
+            st.markdown(f"""
+            <div class="cob-card-fix">
+                <div class="avatar-fix">{iniciais}</div>
+                <div style="flex:1;">
+                    <div class="nome-fix">{str(row['Cliente']).title()}</div>
+                    <div class="desc-fix">{row['Descricao']} • Principal {dinheiro(row['Valor Emprestado'])}</div>
+                    <div class="total-fix">{dinheiro(row['Valor Total'])}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            b1, b2, b3 = st.columns([1, 1, 1])
+            with b1:
+                if st.button("✅ Pagar", key=f"cob_pagar_{row['id']}", use_container_width=True):
+                    ok, resp = marcar_pago_rapido(row)
+                    if ok:
+                        st.success("Pago. Saiu das cobranças de hoje.")
+                        st.rerun()
+                    else:
+                        st.error(resp)
+            with b2:
+                if st.button("💰 Juros", key=f"cob_juros_{row['id']}", use_container_width=True):
+                    ok, resp = pagar_juros_rapido(row)
+                    if ok:
+                        st.success("Juros recebido. Vencimento jogado para o próximo mês.")
+                        st.rerun()
+                    else:
+                        st.error(resp)
+            with b3:
+                if st.button("✏️ Editar", key=f"cob_edit_{row['id']}", use_container_width=True):
+                    ir_para("Gerenciar Contratos", "Todos", row["id"])
 
 
 def grafico_valores(df_base, hoje_ref):
@@ -952,6 +1222,144 @@ def montar_cobrancas_amanha(df_base, hoje_ref):
 # =========================
 # LOGIN
 # =========================
+
+
+def mostrar_cobrancas_hoje(cobrancas_hoje_lista):
+    qtd = 0 if cobrancas_hoje_lista is None or cobrancas_hoje_lista.empty else len(cobrancas_hoje_lista)
+
+    st.markdown("""
+    <style>
+    .cobrancas-box {
+        background: linear-gradient(145deg, rgba(18,18,18,.98), rgba(34,34,34,.96));
+        border: 1px solid rgba(255, 215, 106, .45);
+        border-radius: 28px;
+        padding: 22px;
+        margin-top: 18px;
+        box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    .cobrancas-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+    }
+    .cobrancas-title {
+        font-size: 30px;
+        font-weight: 900;
+        color: #fff;
+    }
+    .cobrancas-badge {
+        border: 1px solid rgba(255,215,106,.7);
+        border-radius: 999px;
+        padding: 8px 16px;
+        color: #FFD76A;
+        font-weight: 900;
+        background: rgba(255,215,106,.08);
+    }
+    .cobranca-item-html {
+        background: rgba(255,255,255,.055);
+        border: 1px solid rgba(255,215,106,.28);
+        border-radius: 20px;
+        padding: 16px 18px;
+        margin: 12px 0 8px 0;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    .cobranca-row-html {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+    .avatar-cob-html {
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        background: linear-gradient(135deg,#0ac45b,#83f28f);
+        display: flex;
+        align-items:center;
+        justify-content:center;
+        font-weight:900;
+        color:white;
+        font-size:18px;
+        flex: 0 0 auto;
+    }
+    .cob-nome-html {
+        font-size: 21px;
+        font-weight: 900;
+        color: white;
+        margin-bottom: 4px;
+    }
+    .cob-desc-html {
+        color: #dadada;
+        font-size: 14px;
+    }
+    .cob-total-html {
+        color: #FFD76A;
+        font-size: 24px;
+        font-weight: 900;
+        margin-top: 6px;
+    }
+    div.stButton > button {
+        border-radius: 14px !important;
+        font-weight: 900 !important;
+        min-height: 42px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.markdown(f"""
+        <div class="cobrancas-head">
+            <div class="cobrancas-title">📌 Contratos para cobrar hoje</div>
+            <div class="cobrancas-badge">{qtd} contrato(s)</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if qtd == 0:
+            st.info("Nenhum contrato para cobrar hoje.")
+            return
+
+        for _, cob in cobrancas_hoje_lista.iterrows():
+            nome = str(cob.get("Cliente", "")).title()
+            iniciais = "".join([p[0] for p in nome.split()[:2]]).upper() or "CL"
+            valor = dinheiro(cob.get("Valor Emprestado", 0))
+            total = dinheiro(cob.get("Valor Total", cob.get("Valor Emprestado", 0)))
+
+            st.markdown(f"""
+            <div class="cobranca-item-html">
+                <div class="cobranca-row-html">
+                    <div class="avatar-cob-html">{iniciais}</div>
+                    <div>
+                        <div class="cob-nome-html">{nome}</div>
+                        <div class="cob-desc-html">Empréstimo • Principal {valor}</div>
+                        <div class="cob-total-html">{total}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            ac1, ac2, ac3 = st.columns([1, 1, 1])
+            with ac1:
+                if st.button("✅ Pagar", key=f"cob_pagar_fix2_{cob['id']}", use_container_width=True):
+                    ok, resp = marcar_pago_rapido(cob["id"])
+                    if ok:
+                        st.success("Contrato marcado como pago.")
+                        st.rerun()
+                    else:
+                        st.error(resp)
+            with ac2:
+                if st.button("💰 Juros", key=f"cob_juros_fix2_{cob['id']}", use_container_width=True):
+                    ok, resp = pagar_juros_rapido(cob["id"], cob.get("Data Vencimento", date.today()))
+                    if ok:
+                        st.success("Juros recebido e vencimento renovado.")
+                        st.rerun()
+                    else:
+                        st.error(resp)
+            with ac3:
+                if st.button("✏️ Editar", key=f"cob_edit_fix2_{cob['id']}", use_container_width=True):
+                    ir_para("Gerenciar Contratos", "Todos", cob["id"])
+
+
+
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
@@ -1007,10 +1415,23 @@ if st.sidebar.button("🚪 Sair"):
     st.session_state["logado"] = False
     st.rerun()
 
-menu = st.sidebar.radio(
-    "Menu",
-    ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenciar Contratos", "Relatórios"]
-)
+opcoes_menu = ["Dashboard", "Clientes", "Carteira", "Novo Empréstimo", "Gerenciar Contratos", "Relatórios"]
+menu_qp = get_qp("menu", opcoes_menu[0])
+if menu_qp not in opcoes_menu:
+    menu_qp = opcoes_menu[0]
+menu_url_forcado = st.session_state.pop("menu_forcado", None) or get_qp("menu", None)
+if "menu_atual_manual" not in st.session_state:
+    st.session_state["menu_atual_manual"] = menu_url_forcado if menu_url_forcado in opcoes_menu else opcoes_menu[0]
+menu = st.sidebar.radio("Menu", opcoes_menu, index=opcoes_menu.index(st.session_state["menu_atual_manual"]), key="menu_radio_corrigido")
+if menu != st.session_state.get("menu_atual_manual"):
+    st.session_state["menu_atual_manual"] = menu
+    limpar_url()
+    st.rerun()
+st.session_state["menu_atual_manual"] = menu
+# Força a navegação quando um botão muda a URL (?menu=...)
+menu_forcado = get_qp("menu", None)
+if menu_forcado in opcoes_menu:
+    menu = menu_forcado
 
 st.sidebar.markdown("""
 <div class="side-card">
@@ -1125,8 +1546,28 @@ elif menu == "Gerenciar Contratos":
     if df.empty:
         st.info("Nenhum cliente cadastrado.")
     else:
-        cliente = st.selectbox("Escolha o cliente", df["Cliente"].tolist())
-        idx = df[df["Cliente"] == cliente].index[0]
+        edit_id = get_qp("edit_id", None)
+
+        opcoes = []
+        mapa_opcoes = {}
+        for _, r in df.iterrows():
+            rid = str(r["id"])
+            rotulo = f"{str(r['Cliente']).title()} • {dinheiro(r['Valor Emprestado'])}"
+            if rotulo in mapa_opcoes:
+                rotulo = f"{rotulo} • {rid[:8]}"
+            opcoes.append(rotulo)
+            mapa_opcoes[rotulo] = rid
+
+        indice = 0
+        if edit_id:
+            for i, rotulo in enumerate(opcoes):
+                if mapa_opcoes[rotulo] == str(edit_id):
+                    indice = i
+                    break
+
+        escolhido = st.selectbox("Escolha o contrato", opcoes, index=indice)
+        id_registro = mapa_opcoes[escolhido]
+        idx = df[df["id"].astype(str) == str(id_registro)].index[0]
 
         nome = st.text_input("Nome do Cliente", value=str(df.at[idx, "Cliente"]))
         descricao = st.text_input("Descrição", value=str(df.at[idx, "Descricao"]))
@@ -1134,9 +1575,8 @@ elif menu == "Gerenciar Contratos":
         juros = st.number_input("Juros (%)", min_value=0.0, value=float(df.at[idx, "Porcentagem Juros (%)"]), step=1.0)
         data_emp = selecionar_data("📅 Data do Empréstimo", df.at[idx, "Data Emprestimo"], "edit_emp")
         data_venc = selecionar_data("📅 Data de Vencimento", df.at[idx, "Data Vencimento"], "edit_venc")
-        status = st.selectbox("Status", ["Pendente", "Pago"], index=0 if str(df.at[idx, "Status"]) != "Pago" else 1)
-
-        id_registro = df.at[idx, "id"]
+        status_atual = str(df.at[idx, "Status"])
+        status = st.selectbox("Status", ["Pendente", "Pago"], index=0 if status_atual != "Pago" else 1)
 
         row = {
             "Cliente": nome.strip(),
@@ -1155,13 +1595,14 @@ elif menu == "Gerenciar Contratos":
         colA, colB, colC, colD = st.columns(4)
 
         with colA:
-            if st.button("💾 Salvar alterações"):
+            if st.button("💾 Salvar alterações", use_container_width=True):
                 if atualizar(id_registro, row):
                     st.success("Alterações salvas online!")
+                    st.query_params.clear()
                     st.rerun()
 
         with colB:
-            if st.button("💵 Só pagou os juros (+30 dias)"):
+            if st.button("💵 Só pagou os juros (+30 dias)", use_container_width=True):
                 row["Data Vencimento"] = pd.to_datetime(df.at[idx, "Data Vencimento"]).date() + timedelta(days=30)
                 row["Status"] = "Pendente"
                 if atualizar(id_registro, row):
@@ -1169,16 +1610,17 @@ elif menu == "Gerenciar Contratos":
                     st.rerun()
 
         with colC:
-            if st.button("✅ Receber total"):
+            if st.button("✅ Receber total", use_container_width=True):
                 row["Status"] = "Pago"
                 if atualizar(id_registro, row):
                     st.success("Contrato marcado como pago.")
                     st.rerun()
 
         with colD:
-            if st.button("🗑️ Excluir"):
+            if st.button("🗑️ Excluir", use_container_width=True):
                 if excluir(id_registro):
                     st.warning("Excluído.")
+                    st.query_params.clear()
                     st.rerun()
 
 
@@ -1189,13 +1631,14 @@ else:
     if df.empty:
         st.info("Nenhum contrato cadastrado ainda.")
     else:
-        total_emp = df["Valor Emprestado"].sum()
-        total_lucro = df["Lucro"].sum()
-        total_geral = df["Valor Total"].sum()
+        df_abertos = df[df["Status"].astype(str) == "Pendente"].copy()
+        total_emp = df_abertos["Valor Emprestado"].sum()
+        total_lucro = df_abertos["Lucro"].sum()
+        total_geral = df_abertos["Valor Total"].sum()
 
-        atrasados = df[(df["Data Vencimento"] < hoje) & (df["Status"] == "Pendente")]
-        cobrancas = df[(df["Data Vencimento"] == hoje) & (df["Status"] == "Pendente")]
-        clientes_em_dia = df[(df["Data Vencimento"] > hoje) & (df["Status"] == "Pendente")]
+        atrasados = df_abertos[df_abertos["Data Vencimento"] < hoje]
+        cobrancas = df_abertos[df_abertos["Data Vencimento"] == hoje]
+        clientes_em_dia = df_abertos[df_abertos["Data Vencimento"] > hoje]
 
         if menu == "Dashboard":
             st.markdown(f"""
@@ -1216,33 +1659,35 @@ else:
 
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
-            kpi_card("Clientes Ativos", len(df), "👥", "Total cadastrados")
+            kpi_card("Clientes Ativos", len(df_abertos), "👥", "Total cadastrados")
+            if st.button("Abrir Clientes", key="kpi_clientes", use_container_width=True):
+                ir_para("Carteira", "Todos")
         with c2:
             kpi_card("Capital Investido", dinheiro(total_emp), "💰", "Total em aberto", "yellow")
+            if st.button("Abrir Capital", key="kpi_capital", use_container_width=True):
+                ir_para("Carteira", "Pendente")
         with c3:
             kpi_card("Lucro Esperado", dinheiro(total_lucro), "📈", "A receber", "blue")
+            if st.button("Abrir Lucro", key="kpi_lucro", use_container_width=True):
+                ir_para("Carteira", "Pendente")
         with c4:
             kpi_card("Total da Carteira", dinheiro(total_geral), "💵", "Principal + juros")
+            if st.button("Abrir Carteira", key="kpi_carteira", use_container_width=True):
+                ir_para("Carteira", "Todos")
         with c5:
             kpi_card("Inadimplentes", len(atrasados), "❗", "Contratos vencidos", "red")
+            if st.button("Abrir Atrasados", key="kpi_atrasados", use_container_width=True):
+                ir_para("Carteira", "Atrasado")
 
         if menu in ["Dashboard", "Relatórios"]:
-            col_chart, col_values = st.columns([1.45, 1.0])
+            col_chart, col_status = st.columns([1.45, 1.0])
             with col_chart:
                 st.markdown('<div class="panel"><div class="panel-title">📊 Resumo Financeiro</div>', unsafe_allow_html=True)
-                fig = grafico_financeiro(df)
+                fig = grafico_financeiro(df_abertos)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            with col_values:
-                st.markdown('<div class="panel"><div class="panel-title">💎 Resumo por Categoria</div>', unsafe_allow_html=True)
-                figv = grafico_valores(df, hoje)
-                if figv:
-                    st.plotly_chart(figv, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            col_status, col_day = st.columns([1.15, 1.0])
             with col_status:
                 st.markdown('<div class="panel"><div class="panel-title">🍀 Situação dos Clientes</div>', unsafe_allow_html=True)
                 fig2 = grafico_status(df, hoje)
@@ -1250,8 +1695,18 @@ else:
                     st.plotly_chart(fig2, use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
+            col_values, col_day = st.columns([1.0, 1.0])
+            with col_values:
+                st.markdown('<div class="panel"><div class="panel-title">💎 Resumo por Categoria</div>', unsafe_allow_html=True)
+                figv = grafico_valores(df_abertos, hoje)
+                if figv:
+                    st.plotly_chart(figv, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+                painel_recebimentos_hoje(df, cobrancas)
+
             with col_day:
                 painel_cobrancas_do_dia(cobrancas, hoje)
+                painel_lista_cobrancas(cobrancas)
 
         st.markdown("""
         <div class="search-panel-v6">
@@ -1260,7 +1715,12 @@ else:
         """, unsafe_allow_html=True)
 
         busca = st.text_input("Pesquisar", placeholder="Digite nome do cliente, descrição, valor ou ID...")
-        filtro_status = st.selectbox("Filtrar por situação", ["Todos", "Pendente", "Pago", "Atrasado", "Cobrança Hoje", "Em dia"])
+
+        opcoes_filtro = ["Todos", "Pendente", "Pago", "Atrasado", "Cobrança Hoje", "Em dia"]
+        filtro_url = get_qp("filtro", "Todos")
+        if filtro_url not in opcoes_filtro:
+            filtro_url = "Todos"
+        filtro_status = st.selectbox("Filtrar por situação", opcoes_filtro, index=opcoes_filtro.index(filtro_url))
 
         st.markdown('<span class="quick-pill-v6">👥 Todos</span><span class="quick-pill-v6">✅ Em dia</span><span class="quick-pill-v6">🚨 Atrasados</span><span class="quick-pill-v6">⚠️ Vencem hoje</span><span class="quick-pill-v6">💰 Pagos</span>', unsafe_allow_html=True)
 
